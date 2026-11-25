@@ -25,6 +25,15 @@ npm run dev
 
 ## Customer and admin panels
 
-The account and admin panels use Supabase email sign-in. Enable email authentication and add the deployed site's `/account` and `/admin` URLs to the Supabase redirect URL allowlist.
+The account and admin panels use Supabase email sign-in. For **each deployment**, configure these variables before building:
+
+```text
+VITE_SUPABASE_URL=https://<your-project-ref>.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=<your-project-publishable-key>
+```
+
+These are the public Supabase URL and publishable/anon key, not a service-role key. The server also accepts `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` as runtime variables. Keep them set on the deployment server if your hosting provider does not expose build-time `VITE_` variables to server functions. Rebuild/redeploy after changing build-time variables.
+
+In Supabase Authentication settings, enable email sign-in, set the production site URL, and allow the deployed callback URLs (`https://<deployment-host>/account` and `https://<deployment-host>/admin`) under **URL Configuration > Redirect URLs**. Each staging or preview host must also be allowed. To use one stable callback host across previews, set `VITE_AUTH_REDIRECT_URL` to that site's origin, for example `https://www.example.com`; that host must be in the Supabase redirect allowlist and must serve both routes.
 
 Apply the SQL migrations in `drizzle/migrations` in order. The access migration lets signed-in customers view requests for their own email and lets admins view and update requests. To grant admin access, set `app_metadata.role` to `admin` for the user's Supabase Auth account, then have them sign out and back in so their access token includes the role. Do not put this role in editable user metadata.

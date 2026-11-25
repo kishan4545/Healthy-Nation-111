@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { DEMO_ADMIN, DEMO_REQUESTS } from "@/lib/demo-account";
+import { getAuthRedirectUrl, getSignInErrorMessage } from "@/lib/auth-redirect";
 
 export const Route = createFileRoute("/admin")({
   head: () => seo("Admin Dashboard — Healthy Nation", "Manage Healthy Nation subscription requests.", "/admin"),
@@ -50,9 +51,9 @@ function AdminSignIn({ onDemoSignIn }: { onDemoSignIn: () => void }) {
     try {
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
-        options: { emailRedirectTo: `${window.location.origin}/admin` },
+        options: { emailRedirectTo: getAuthRedirectUrl("/admin") },
       });
-      setMessage(error ? "We couldn't send the sign-in link. Please try again." : "Check your email for the secure sign-in link.");
+      setMessage(error ? getSignInErrorMessage(error) : "Check your email for the secure sign-in link.");
     } catch {
       setMessage("We couldn't send the sign-in link. Please check your connection and try again.");
     } finally {
@@ -112,44 +113,52 @@ function AdminDashboard() {
     }
 
     let active = true;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!active || event === "INITIAL_SESSION") return;
-      queueMicrotask(() => {
-        if (!active) return;
-        if (session) {
-          if (event === "SIGNED_IN") {
+    let unsubscribe = () => {};
+    try {
+      const auth = supabase.auth;
+      const { data: { subscription } } = auth.onAuthStateChange((event, session) => {
+        if (!active || event === "INITIAL_SESSION") return;
+        queueMicrotask(() => {
+          if (!active) return;
+          if (session) {
+            if (event === "SIGNED_IN") {
+              setAuthorized(false);
+              setRequests([]);
+              setCounts({ total: 0, active: 0, pending: 0, thisMonth: 0 });
+            }
+            void refresh();
+          }
+          else {
             setAuthorized(false);
             setRequests([]);
             setCounts({ total: 0, active: 0, pending: 0, thisMonth: 0 });
+            setLoading(false);
           }
-          void refresh();
-        }
-        else {
-          setAuthorized(false);
-          setRequests([]);
-          setCounts({ total: 0, active: 0, pending: 0, thisMonth: 0 });
-          setLoading(false);
-        }
+        });
       });
-    });
+      unsubscribe = () => subscription.unsubscribe();
 
-    void supabase.auth.getSession()
-      .then(({ data, error }) => {
-        if (!active) return;
-        if (error) throw error;
-        if (data.session) void refresh();
-        else setLoading(false);
-      })
-      .catch(() => {
-        if (active) {
-          setError("We couldn't check your sign-in. Please refresh and try again.");
-          setLoading(false);
-        }
-      });
+      void auth.getSession()
+        .then(({ data, error }) => {
+          if (!active) return;
+          if (error) throw error;
+          if (data.session) void refresh();
+          else setLoading(false);
+        })
+        .catch(() => {
+          if (active) {
+            setError("We couldn't check your sign-in. Please check the Supabase deployment configuration and retry.");
+            setLoading(false);
+          }
+        });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Supabase sign-in is not configured for this deployment.");
+      setLoading(false);
+    }
 
     return () => {
       active = false;
-      subscription.unsubscribe();
+      unsubscribe();
     };
   }, [demoMode, refresh]);
 

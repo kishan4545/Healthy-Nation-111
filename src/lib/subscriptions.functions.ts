@@ -1,13 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { getSupabaseConfig } from "@/integrations/supabase/config";
 import { requestSchema, type SubscriptionRequestInput } from "@/lib/subscription-schema";
 
 export const submitSubscriptionRequest = createServerFn({ method: "POST" })
   .validator((input: SubscriptionRequestInput) => requestSchema.parse(input))
   .handler(async ({ data }) => {
-    const key = process.env["SUPABASE_PUBLISHABLE_KEY"]!;
-    const supabasePublic = createClient<Database>(process.env["SUPABASE_URL"]!, key, {
+    const { url, publishableKey: key } = getSupabaseConfig();
+    const supabasePublic = createClient<Database>(url, key, {
       auth: { persistSession: false, autoRefreshToken: false },
       // Opaque sb_ keys aren't JWTs; send only apikey, not the default Authorization bearer.
       global: {

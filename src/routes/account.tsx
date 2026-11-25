@@ -8,6 +8,7 @@ import { seo } from "@/components/site";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DEMO_CUSTOMER, DEMO_SUBSCRIPTIONS } from "@/lib/demo-account";
+import { getAuthRedirectUrl, getSignInErrorMessage } from "@/lib/auth-redirect";
 
 export const Route = createFileRoute("/account")({
   head: () => seo("My Account — Healthy Nation", "View your Healthy Nation subscription requests and plan status.", "/account"),
@@ -47,29 +48,37 @@ function CustomerAccount() {
 
   useEffect(() => {
     let active = true;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!active || event === "INITIAL_SESSION") return;
-      queueMicrotask(() => {
-        if (active) void refresh(Boolean(session));
+    let unsubscribe = () => {};
+    try {
+      const auth = supabase.auth;
+      const { data: { subscription } } = auth.onAuthStateChange((event, session) => {
+        if (!active || event === "INITIAL_SESSION") return;
+        queueMicrotask(() => {
+          if (active) void refresh(Boolean(session));
+        });
       });
-    });
+      unsubscribe = () => subscription.unsubscribe();
 
-    void supabase.auth.getSession()
-      .then(({ data, error }) => {
-        if (!active) return;
-        if (error) throw error;
-        void refresh(Boolean(data.session));
-      })
-      .catch(() => {
-        if (active) {
-          setMessage("We couldn't check your sign-in. Please refresh and try again.");
-          setLoading(false);
-        }
-      });
+      void auth.getSession()
+        .then(({ data, error }) => {
+          if (!active) return;
+          if (error) throw error;
+          void refresh(Boolean(data.session));
+        })
+        .catch(() => {
+          if (active) {
+            setMessage("We couldn't check your sign-in. Please check the Supabase deployment configuration and retry.");
+            setLoading(false);
+          }
+        });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Supabase sign-in is not configured for this deployment.");
+      setLoading(false);
+    }
 
     return () => {
       active = false;
-      subscription.unsubscribe();
+      unsubscribe();
     };
   }, [refresh]);
 
@@ -80,9 +89,9 @@ function CustomerAccount() {
     try {
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
-        options: { emailRedirectTo: `${window.location.origin}/account` },
+        options: { emailRedirectTo: getAuthRedirectUrl("/account") },
       });
-      setMessage(error ? "We couldn't send the sign-in link. Please try again." : "Check your email for your secure sign-in link.");
+      setMessage(error ? getSignInErrorMessage(error) : "Check your email for your secure sign-in link.");
     } catch {
       setMessage("We couldn't send the sign-in link. Please check your connection and try again.");
     } finally {
