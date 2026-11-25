@@ -41,9 +41,40 @@ function CustomerAccount() {
   }
 
   useEffect(() => {
-    void refresh();
-    const { data } = supabase.auth.onAuthStateChange(() => void refresh());
-    return () => data.subscription.unsubscribe();
+    if (new URLSearchParams(window.location.search).get("demo") === "1") {
+      setDemoMode(true);
+      setSignedIn(true);
+      setRequests(DEMO_SUBSCRIPTIONS);
+      setLoading(false);
+      setMessage("Demo customer session active.");
+      return;
+    }
+
+    let active = true;
+    Promise.race([
+      supabase.auth.getSession(),
+      new Promise<{ data: { session: null } }>((resolve) => setTimeout(() => resolve({ data: { session: null } }), 800)),
+    ]).then(({ data }) => {
+      if (!active) return;
+      if (data.session) void refresh();
+      else {
+        setSignedIn(false);
+        setLoading(false);
+      }
+    }).catch(() => {
+      if (active) {
+        setSignedIn(false);
+        setLoading(false);
+      }
+    });
+
+    const { data } = supabase.auth.onAuthStateChange(() => {
+      if (active) void refresh();
+    });
+    return () => {
+      active = false;
+      data.subscription.unsubscribe();
+    };
   }, []);
 
   async function handleSignIn(event: React.FormEvent) {

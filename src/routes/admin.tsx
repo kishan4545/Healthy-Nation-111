@@ -103,7 +103,32 @@ function AdminDashboard() {
     }
   }
 
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("demo") === "1") {
+      setDemoMode(true);
+      setRequests(DEMO_REQUESTS);
+      setCounts({
+        total: DEMO_REQUESTS.length,
+        active: DEMO_REQUESTS.filter((request) => request.status === "active").length,
+        pending: DEMO_REQUESTS.filter((request) => request.status === "new").length,
+        thisMonth: DEMO_REQUESTS.length,
+      });
+      setAuthorized(true);
+      setLoading(false);
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) void refresh();
+      else {
+        setAuthorized(false);
+        setLoading(false);
+      }
+    }).catch(() => {
+      setAuthorized(false);
+      setLoading(false);
+    });
+  }, []);
 
   async function changeStatus(id: string, status: string) {
     if (demoMode) {
@@ -140,7 +165,18 @@ function AdminDashboard() {
           <PackageCheck className="mb-5 text-leaf" size={30} />
           <h1 className="text-3xl font-extrabold">Admin sign-in</h1>
           <p className="mt-2 text-sm text-muted-foreground">Sign in with an account assigned the <strong>admin</strong> role.</p>
-          <AdminSignIn onSignedIn={() => void refresh()} onDemoSignIn={() => { setDemoMode(true); setRequests(DEMO_REQUESTS); setCounts({ total: DEMO_REQUESTS.length, active: DEMO_REQUESTS.filter((request) => request.status === "active").length, pending: DEMO_REQUESTS.filter((request) => request.status === "new").length, thisMonth: DEMO_REQUESTS.length }); setAuthorized(true); setLoading(false); }} />
+          <AdminSignIn onSignedIn={() => void refresh()} onDemoSignIn={() => {
+            setDemoMode(true);
+            setRequests(DEMO_REQUESTS);
+            setCounts({
+              total: DEMO_REQUESTS.length,
+              active: DEMO_REQUESTS.filter((request) => request.status === "active").length,
+              pending: DEMO_REQUESTS.filter((request) => request.status === "new").length,
+              thisMonth: DEMO_REQUESTS.length,
+            });
+            setAuthorized(true);
+            setLoading(false);
+          }} />
           {error && <p className="mt-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
           <Button variant="ghost" className="mt-2 w-full" onClick={() => void refresh()}><RefreshCw /> Try again</Button>
         </div>
