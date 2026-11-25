@@ -32,7 +32,7 @@ VITE_SUPABASE_URL=https://<your-project-ref>.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=<your-project-publishable-key>
 ```
 
-These are the public Supabase URL and publishable/anon key, not a service-role key. The server also accepts `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` as runtime variables. Keep them set on the deployment server if your hosting provider does not expose build-time `VITE_` variables to server functions. Rebuild/redeploy after changing build-time variables.
+For local development, copy `.env.example` to `.env` and replace both placeholders. These are the public Supabase URL and publishable/anon key, not a service-role key. On Vercel, add both `VITE_` variables in **Project Settings > Environment Variables**, select Production (and Preview/Development if used), then trigger a new deployment. They must be present at build time; setting server runtime variables alone cannot populate the browser bundle. The server also accepts `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` as runtime variables for server functions.
 
 In Supabase Authentication settings, enable email sign-in, set the production site URL, and allow the deployed callback URLs (`https://<deployment-host>/account` and `https://<deployment-host>/admin`) under **URL Configuration > Redirect URLs**. Each staging or preview host must also be allowed. To use one stable callback host across previews, set `VITE_AUTH_REDIRECT_URL` to that site's origin, for example `https://www.example.com`; that host must be in the Supabase redirect allowlist and must serve both routes.
 

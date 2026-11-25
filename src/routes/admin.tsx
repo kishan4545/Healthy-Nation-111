@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { DEMO_ADMIN, DEMO_REQUESTS } from "@/lib/demo-account";
 import { getAuthRedirectUrl, getSignInErrorMessage } from "@/lib/auth-redirect";
+import { getSupabaseConfigurationErrorMessage } from "@/integrations/supabase/config";
 
 export const Route = createFileRoute("/admin")({
   head: () => seo("Admin Dashboard — Healthy Nation", "Manage Healthy Nation subscription requests.", "/admin"),
@@ -54,8 +55,11 @@ function AdminSignIn({ onDemoSignIn }: { onDemoSignIn: () => void }) {
         options: { emailRedirectTo: getAuthRedirectUrl("/admin") },
       });
       setMessage(error ? getSignInErrorMessage(error) : "Check your email for the secure sign-in link.");
-    } catch {
-      setMessage("We couldn't send the sign-in link. Please check your connection and try again.");
+    } catch (error) {
+      setMessage(
+        getSupabaseConfigurationErrorMessage(error) ??
+          "We couldn't send the sign-in link. Please check your connection and try again.",
+      );
     } finally {
       setSending(false);
     }
@@ -100,7 +104,12 @@ function AdminDashboard() {
       setCounts(result.counts);
       setAuthorized(true);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load subscription requests. Please try again.");
+      setError(
+        getSupabaseConfigurationErrorMessage(caught) ??
+          (caught instanceof Error
+            ? caught.message
+            : "Could not load subscription requests. Please try again."),
+      );
     } finally {
       setLoading(false);
     }
@@ -147,12 +156,15 @@ function AdminDashboard() {
         })
         .catch(() => {
           if (active) {
-            setError("We couldn't check your sign-in. Please check the Supabase deployment configuration and retry.");
+            setError("We couldn't check your sign-in. Please refresh and try again.");
             setLoading(false);
           }
         });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Supabase sign-in is not configured for this deployment.");
+      setError(
+        getSupabaseConfigurationErrorMessage(caught) ??
+          "Supabase sign-in is unavailable. Please contact the site administrator.",
+      );
       setLoading(false);
     }
 
@@ -178,7 +190,12 @@ function AdminDashboard() {
       await refresh();
     } catch (caught) {
       setRequests((current) => current.map((request) => request.id === id ? { ...request, status: previous.status } : request));
-      setError(caught instanceof Error ? caught.message : "Could not update this request. Please try again.");
+      setError(
+        getSupabaseConfigurationErrorMessage(caught) ??
+          (caught instanceof Error
+            ? caught.message
+            : "Could not update this request. Please try again."),
+      );
     }
   }
 

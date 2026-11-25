@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DEMO_CUSTOMER, DEMO_SUBSCRIPTIONS } from "@/lib/demo-account";
 import { getAuthRedirectUrl, getSignInErrorMessage } from "@/lib/auth-redirect";
+import { getSupabaseConfigurationErrorMessage } from "@/integrations/supabase/config";
 
 export const Route = createFileRoute("/account")({
   head: () => seo("My Account — Healthy Nation", "View your Healthy Nation subscription requests and plan status.", "/account"),
@@ -67,12 +68,15 @@ function CustomerAccount() {
         })
         .catch(() => {
           if (active) {
-            setMessage("We couldn't check your sign-in. Please check the Supabase deployment configuration and retry.");
+            setMessage("We couldn't check your sign-in. Please refresh and try again.");
             setLoading(false);
           }
         });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Supabase sign-in is not configured for this deployment.");
+      setMessage(
+        getSupabaseConfigurationErrorMessage(error) ??
+          "Supabase sign-in is unavailable. Please contact the site administrator.",
+      );
       setLoading(false);
     }
 
@@ -92,8 +96,11 @@ function CustomerAccount() {
         options: { emailRedirectTo: getAuthRedirectUrl("/account") },
       });
       setMessage(error ? getSignInErrorMessage(error) : "Check your email for your secure sign-in link.");
-    } catch {
-      setMessage("We couldn't send the sign-in link. Please check your connection and try again.");
+    } catch (error) {
+      setMessage(
+        getSupabaseConfigurationErrorMessage(error) ??
+          "We couldn't send the sign-in link. Please check your connection and try again.",
+      );
     } finally {
       setSending(false);
     }
