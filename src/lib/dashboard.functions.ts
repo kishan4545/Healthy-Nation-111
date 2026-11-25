@@ -16,16 +16,10 @@ export type SubscriptionRequest = {
 };
 
 function isAdmin(claims: Record<string, unknown>) {
-  const appMetadata = claims.app_metadata as Record<string, unknown> | undefined;
-  const email = typeof claims.email === "string" ? claims.email.toLowerCase().trim() : "";
-  const allowlist = (process.env["ADMIN_EMAILS"] ?? "")
-    .split(",")
-    .map((value) => value.toLowerCase().trim())
-    .filter(Boolean);
-
-  return appMetadata?.role === "admin"
-    || (Array.isArray(appMetadata?.roles) && appMetadata.roles.includes("admin"))
-    || (email !== "" && allowlist.includes(email));
+  const appMetadata = claims["app_metadata"] as Record<string, unknown> | undefined;
+  const roles = appMetadata?.["roles"];
+  return appMetadata?.["role"] === "admin"
+    || (Array.isArray(roles) && roles.includes("admin"));
 }
 
 export const getAdminDashboard = createServerFn({ method: "GET" })
@@ -35,13 +29,15 @@ export const getAdminDashboard = createServerFn({ method: "GET" })
       throw new Error("Forbidden: administrator access required");
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await context.supabase
       .from("subscription_requests")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (error) throw new Error("Could not load subscription requests");
+    if (error) {
+      console.error("Could not load subscription requests:", error.message);
+      throw new Error("Could not load subscription requests. Check the subscription access policies in Supabase.");
+    }
 
     const requests = (data ?? []) as SubscriptionRequest[];
     const activeStatuses = new Set(["active"]);
@@ -70,13 +66,15 @@ export const updateSubscriptionStatus = createServerFn({ method: "POST" })
     const allowed = ["new", "contacted", "active", "cancelled"];
     if (!allowed.includes(data.status)) throw new Error("Invalid status");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin
+    const { error } = await context.supabase
       .from("subscription_requests")
       .update({ status: data.status })
       .eq("id", data.id);
 
-    if (error) throw new Error("Could not update subscription status");
+    if (error) {
+      console.error("Could not update subscription status:", error.message);
+      throw new Error("Could not update subscription status. Check the subscription access policies in Supabase.");
+    }
     return { ok: true as const };
   });
 
@@ -84,16 +82,18 @@ export const getMySubscriptions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const claims = context.claims as Record<string, unknown>;
-    const email = typeof claims.email === "string" ? claims.email : null;
+    const email = typeof claims["email"] === "string" ? claims["email"] : null;
     if (!email) return { requests: [] as SubscriptionRequest[] };
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await context.supabase
       .from("subscription_requests")
       .select("*")
       .ilike("email", email)
       .order("created_at", { ascending: false });
 
-    if (error) throw new Error("Could not load your subscriptions");
+    if (error) {
+      console.error("Could not load customer subscriptions:", error.message);
+      throw new Error("Could not load your subscriptions. Please try again or contact the kitchen.");
+    }
     return { requests: (data ?? []) as SubscriptionRequest[] };
   });

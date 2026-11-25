@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { CalendarDays, CheckCircle2, Clock3, PackageCheck, RefreshCw, Users } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -15,7 +15,20 @@ export const Route = createFileRoute("/admin")({
   component: AdminDashboard,
 });
 
-function AdminSignIn({ onSignedIn, onDemoSignIn }: { onSignedIn: () => void; onDemoSignIn: () => void }) {
+function getRequestCounts(requests: SubscriptionRequest[]) {
+  const now = new Date();
+  return {
+    total: requests.length,
+    active: requests.filter((request) => request.status?.toLowerCase() === "active").length,
+    pending: requests.filter((request) => ["pending", "new"].includes(request.status?.toLowerCase())).length,
+    thisMonth: requests.filter((request) => {
+      const created = new Date(request.created_at);
+      return created.getMonth() === now.getMonth() && created.getFullYear() === now.getFullYear();
+    }).length,
+  };
+}
+
+function AdminSignIn({ onDemoSignIn }: { onDemoSignIn: () => void }) {
   const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState("");
@@ -34,19 +47,18 @@ function AdminSignIn({ onSignedIn, onDemoSignIn }: { onSignedIn: () => void; onD
     event.preventDefault();
     setSending(true);
     setMessage("");
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: window.location.href },
-    });
-    setSending(false);
-    setMessage(error ? "We couldn't send the sign-in link." : "Check your email for the secure sign-in link.");
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim(),
+        options: { emailRedirectTo: `${window.location.origin}/admin` },
+      });
+      setMessage(error ? "We couldn't send the sign-in link. Please try again." : "Check your email for the secure sign-in link.");
+    } catch {
+      setMessage("We couldn't send the sign-in link. Please check your connection and try again.");
+    } finally {
+      setSending(false);
+    }
   }
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) onSignedIn();
-    });
-  }, [onSignedIn]);
 
   return (
     <div className="mt-6 grid gap-5">
@@ -71,22 +83,13 @@ function AdminDashboard() {
   const load = useServerFn(getAdminDashboard);
   const updateStatus = useServerFn(updateSubscriptionStatus);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       if (demoMode) {
-        const now = new Date();
         setRequests(DEMO_REQUESTS);
-        setCounts({
-          total: DEMO_REQUESTS.length,
-          active: DEMO_REQUESTS.filter((request) => request.status === "active").length,
-          pending: DEMO_REQUESTS.filter((request) => request.status === "new").length,
-          thisMonth: DEMO_REQUESTS.filter((request) => {
-            const created = new Date(request.created_at);
-            return created.getMonth() === now.getMonth() && created.getFullYear() === now.getFullYear();
-          }).length,
-        });
+        setCounts(getRequestCounts(DEMO_REQUESTS));
         setAuthorized(true);
         setLoading(false);
         return;
@@ -96,59 +99,92 @@ function AdminDashboard() {
       setCounts(result.counts);
       setAuthorized(true);
     } catch (caught) {
-      setAuthorized(false);
-      setError(caught instanceof Error ? caught.message : "Administrator access is required.");
+      setError(caught instanceof Error ? caught.message : "Could not load subscription requests. Please try again.");
     } finally {
       setLoading(false);
     }
-  }
+  }, [demoMode, load]);
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("demo") === "1") {
-      setDemoMode(true);
-      setRequests(DEMO_REQUESTS);
-      setCounts({
-        total: DEMO_REQUESTS.length,
-        active: DEMO_REQUESTS.filter((request) => request.status === "active").length,
-        pending: DEMO_REQUESTS.filter((request) => request.status === "new").length,
-        thisMonth: DEMO_REQUESTS.length,
-      });
-      setAuthorized(true);
+    if (demoMode) {
       setLoading(false);
       return;
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) void refresh();
-      else {
-        setAuthorized(false);
-        setLoading(false);
-      }
-    }).catch(() => {
-      setAuthorized(false);
-      setLoading(false);
+    let active = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active || event === "INITIAL_SESSION") return;
+      queueMicrotask(() => {
+        if (!active) return;
+        if (session) {
+          if (event === "SIGNED_IN") {
+            setAuthorized(false);
+            setRequests([]);
+            setCounts({ total: 0, active: 0, pending: 0, thisMonth: 0 });
+          }
+          void refresh();
+        }
+        else {
+          setAuthorized(false);
+          setRequests([]);
+          setCounts({ total: 0, active: 0, pending: 0, thisMonth: 0 });
+          setLoading(false);
+        }
+      });
     });
-  }, []);
+
+    void supabase.auth.getSession()
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) throw error;
+        if (data.session) void refresh();
+        else setLoading(false);
+      })
+      .catch(() => {
+        if (active) {
+          setError("We couldn't check your sign-in. Please refresh and try again.");
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, [demoMode, refresh]);
 
   async function changeStatus(id: string, status: string) {
+    const previous = requests.find((request) => request.id === id);
+    if (!previous) return;
+    setError("");
     if (demoMode) {
-      setRequests((current) => current.map((request) => request.id === id ? { ...request, status } : request));
+      const updated = requests.map((request) => request.id === id ? { ...request, status } : request);
+      setRequests(updated);
+      setCounts(getRequestCounts(updated));
       return;
     }
     setRequests((current) => current.map((request) => request.id === id ? { ...request, status } : request));
     try {
       await updateStatus({ data: { id, status } });
       await refresh();
-    } catch {
-      await refresh();
+    } catch (caught) {
+      setRequests((current) => current.map((request) => request.id === id ? { ...request, status: previous.status } : request));
+      setError(caught instanceof Error ? caught.message : "Could not update this request. Please try again.");
     }
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
+    if (!demoMode) {
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) {
+        setError("We couldn't sign you out. Please try again.");
+        return;
+      }
+    }
     setDemoMode(false);
     setRequests([]);
     setAuthorized(false);
+    setCounts({ total: 0, active: 0, pending: 0, thisMonth: 0 });
   }
 
   const cards = [
@@ -164,16 +200,11 @@ function AdminDashboard() {
         <div className="max-w-md rounded-lg border bg-card p-6">
           <PackageCheck className="mb-5 text-leaf" size={30} />
           <h1 className="text-3xl font-extrabold">Admin sign-in</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Sign in with an account assigned the <strong>admin</strong> role.</p>
-          <AdminSignIn onSignedIn={() => void refresh()} onDemoSignIn={() => {
+          <p className="mt-2 text-sm text-muted-foreground">Sign in with an account assigned the <strong>admin</strong> role in Supabase user app metadata.</p>
+          <AdminSignIn onDemoSignIn={() => {
             setDemoMode(true);
             setRequests(DEMO_REQUESTS);
-            setCounts({
-              total: DEMO_REQUESTS.length,
-              active: DEMO_REQUESTS.filter((request) => request.status === "active").length,
-              pending: DEMO_REQUESTS.filter((request) => request.status === "new").length,
-              thisMonth: DEMO_REQUESTS.length,
-            });
+            setCounts(getRequestCounts(DEMO_REQUESTS));
             setAuthorized(true);
             setLoading(false);
           }} />
@@ -197,12 +228,13 @@ function AdminDashboard() {
         ))}
       </div>
 
+      {error && <p role="alert" className="mt-6 rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
       <div className="mt-8 overflow-hidden rounded-lg border bg-card">
         <div className="flex items-center justify-between border-b px-5 py-4"><h2 className="font-bold">Subscription requests</h2><span className="text-sm text-muted-foreground">{requests.length} records</span></div>
         {loading ? <p className="p-6 text-sm text-muted-foreground">Loading requests…</p> : requests.length === 0 ? <p className="p-6 text-sm text-muted-foreground">No subscription requests yet.</p> : (
           <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-secondary text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-3">Customer</th><th className="px-4 py-3">Plan</th><th className="px-4 py-3">Preferences</th><th className="px-4 py-3">Received</th><th className="px-5 py-3">Status</th></tr></thead>
             <tbody>{requests.map((request) => (
-              <tr key={request.id} className="border-t"><td className="px-5 py-4"><p className="font-bold">{request.name}</p><p className="mt-1 text-muted-foreground">{request.phone}</p>{request.address && <p className="mt-1 max-w-52 text-xs text-muted-foreground">{request.address}</p>}</td><td className="px-4 py-4"><p className="font-semibold">{request.plan_name}</p><p className="mt-1 text-muted-foreground">{request.duration}</p></td><td className="px-4 py-4">{request.diet}</td><td className="px-4 py-4 text-muted-foreground">{new Date(request.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</td><td className="px-5 py-4"><Select value={request.status || "new"} onValueChange={(status) => void changeStatus(request.id, status)}><SelectTrigger className="w-36"><SelectValue /></SelectTrigger><SelectContent>{["new", "contacted", "active", "cancelled"].map((status) => <SelectItem key={status} value={status}>{status[0].toUpperCase() + status.slice(1)}</SelectItem>)}</SelectContent></Select></td></tr>
+              <tr key={request.id} className="border-t"><td className="px-5 py-4"><p className="font-bold">{request.name}</p><p className="mt-1 text-muted-foreground">{request.phone}</p>{request.address && <p className="mt-1 max-w-52 text-xs text-muted-foreground">{request.address}</p>}</td><td className="px-4 py-4"><p className="font-semibold">{request.plan_name}</p><p className="mt-1 text-muted-foreground">{request.duration}</p></td><td className="px-4 py-4">{request.diet}</td><td className="px-4 py-4 text-muted-foreground">{new Date(request.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</td><td className="px-5 py-4"><Select value={request.status || "new"} onValueChange={(status) => void changeStatus(request.id, status)}><SelectTrigger className="w-36"><SelectValue /></SelectTrigger><SelectContent>{["new", "contacted", "active", "cancelled"].map((status) => <SelectItem key={status} value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</SelectItem>)}</SelectContent></Select></td></tr>
             ))}</tbody>
           </table></div>
         )}

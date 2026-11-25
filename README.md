@@ -22,3 +22,9 @@ cd <repository-name>
 npm i
 npm run dev
 ```
+
+## Customer and admin panels
+
+The account and admin panels use Supabase email sign-in. Enable email authentication and add the deployed site's `/account` and `/admin` URLs to the Supabase redirect URL allowlist.
+
+Apply the SQL migrations in `drizzle/migrations` in order. The access migration lets signed-in customers view requests for their own email and lets admins view and update requests. To grant admin access, set `app_metadata.role` to `admin` for the user's Supabase Auth account, then have them sign out and back in so their access token includes the role. Do not put this role in editable user metadata.

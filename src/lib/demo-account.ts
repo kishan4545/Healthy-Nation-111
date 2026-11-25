@@ -40,7 +40,7 @@ export const DEMO_SUBSCRIPTIONS: SubscriptionRequest[] = [
 ];
 
 export const DEMO_REQUESTS: SubscriptionRequest[] = [
-  DEMO_SUBSCRIPTIONS[0],
+  ...DEMO_SUBSCRIPTIONS.filter((request) => request.id === "demo-request-1"),
   {
     id: "demo-request-3",
     created_at: "2026-11-23T14:45:00.000Z",
